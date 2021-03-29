@@ -5,7 +5,6 @@ import (
 	"log"
 	"image"
 	"os"
-	"image/jpeg"
 	"image/color"
 	"io"
 	"math"
@@ -53,12 +52,16 @@ func rgbaToPixel(r uint32, g uint32, b uint32, a uint32) Pixel {
 
 // Get the bi-dimensional pixel array
 func getPixels(file io.Reader) ([][]Pixel, error) {
-	img, err := jpeg.Decode(file)
+	img, _, err := image.Decode(file)
 
 	if err != nil {
 		return nil, err
 	}
+    
+    return getPixelsFromImage(img)
+}
 
+func getPixelsFromImage(img image.Image) ([][]Pixel, error) {
 	bounds := img.Bounds()
 	width, height := bounds.Max.X, bounds.Max.Y
 
@@ -111,7 +114,7 @@ func between(value ,min, max int) int {
 	return value
 }
 
-func copyPixelBilinear(originalImage [][]Pixel, x float64, y float64) Pixel {
+func copyPixelBilinear(originalImage [][]Pixel, x float64, y float64) color.Color {
 	/*-----p00(xl,yl)----x,y-----p01(xr,y1)----*/
 	/*-----p10(xl,yr)-----x,y----p11(xr,yr)----*/
 
@@ -128,28 +131,26 @@ func copyPixelBilinear(originalImage [][]Pixel, x float64, y float64) Pixel {
 	p01 := originalImage[yl][xr]
 	p11 := originalImage[yr][xr]
 
-	pixel := Pixel{}
-
 	r0 := float64(p00.R)*(1-xf) + float64(p01.R)*xf
 	r1 := float64(p10.R)*(1-xf) + float64(p11.R)*xf
-	pixel.R = uint32(r0*(1-yf) + r1*yf)
-
-	r0 = float64(p00.A)*(1-xf) + float64(p01.A)*xf
-	r1 = float64(p10.A)*(1-xf) + float64(p11.A)*xf
-	pixel.A = uint32(r0*(1-yf) + r1*yf)
+	R := uint16(r0*(1-yf) + r1*yf)
 
 	r0 = float64(p00.G)*(1-xf) + float64(p01.G)*xf
 	r1 = float64(p10.G)*(1-xf) + float64(p11.G)*xf
-	pixel.G = uint32(r0*(1-yf) + r1*yf)
+	G := uint16(r0*(1-yf) + r1*yf)
 
 	r0 = float64(p00.B)*(1-xf) + float64(p01.B)*xf
 	r1 = float64(p10.B)*(1-xf) + float64(p11.B)*xf
-	pixel.B = uint32(r0*(1-yf) + r1*yf)
+	B := uint16(r0*(1-yf) + r1*yf)
 
-	return pixel
+	r0 = float64(p00.A)*(1-xf) + float64(p01.A)*xf
+	r1 = float64(p10.A)*(1-xf) + float64(p11.A)*xf
+	A := uint16(r0*(1-yf) + r1*yf)
+
+	return color.RGBA64{R,G,B,A};
 }
 
-func processCords(tileX int, tileY int, originalImage [][]Pixel, tile Tile, mathCache cache.CacheAngles) Pixel {
+func processCords(tileX int, tileY int, originalImage [][]Pixel, tile Tile, mathCache cache.CacheAngles) color.Color {
 
 	theta := 0.0
 	phi := 0.0
@@ -214,14 +215,41 @@ func Worker(tile Tile, mathCache cache.CacheAngles, originalImagePath string, do
 
 	for tileY := 0; tileY < tile.TileSize; tileY++ {
 		for tileX := 0; tileX < tile.TileSize; tileX++ {
-			pixelToMove := processCords(tileX, tileY, originalPixels, tile, mathCache)
-			colorPixel := pixelToMove.pixelToRGBA()
-			tileImage.Set(tileX, tileY, colorPixel)
+			color := processCords(tileX, tileY, originalPixels, tile, mathCache)
+			tileImage.Set(tileX, tileY, color)
 		}
 	}
 
 	result := TileResult{Tile: tile, Image: tileImage}
 
 	done <- result
+}
 
+
+func ImageWorker(tile Tile, mathCache cache.CacheAngles, img image.Image, done chan TileResult) {
+	log.Printf("Process for tile %v --> started", tile.TileName)
+	tileImage := image.NewNRGBA(image.Rect(0, 0, tile.TileSize, tile.TileSize))
+	originalPixels, err := getPixelsFromImage(img)
+
+	if err != nil {
+		panic(err)
+	}
+
+	sphereHeight, sphereWidth := len(originalPixels), len(originalPixels[0])
+
+	if sphereWidth/sphereHeight != 2 {
+		log.Fatal("Panorama should has 2:1 aspect ratio")
+		os.Exit(2)
+	}
+
+	for tileY := 0; tileY < tile.TileSize; tileY++ {
+		for tileX := 0; tileX < tile.TileSize; tileX++ {
+			color := processCords(tileX, tileY, originalPixels, tile, mathCache)
+			tileImage.Set(tileX, tileY, color)
+		}
+	}
+
+	result := TileResult{Tile: tile, Image: tileImage}
+
+	done <- result
 }

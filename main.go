@@ -9,7 +9,10 @@ import (
 	"pano2cube/worker"
 	"time"
 	"path/filepath"
+	"image"
     "strings"
+    "errors"
+	"github.com/disintegration/imaging"
 )
 
 var (
@@ -68,6 +71,60 @@ func process(originalImagePath string, tileSize int, outPutDir string) {
 	for _, tileName := range tileNames {
 		tile := worker.Tile{TileName: tileName, TileSize: tileSize}
 		go worker.Worker(tile, cacheResult, originalImagePath, done)
+	}
+
+	for range tileNames {
+		tileResult := <-done
+		//err = saver.SaveTile(tileResult, outPutDir)
+        err = saver.SaveTileSlices(tileResult, prefix, outPutDir)
+
+		if err != nil {
+			log.Fatal(err.Error())
+			os.Exit(2)
+		}
+
+		log.Printf("Process for tile %v --> finished", tileResult.Tile.TileName)
+	}
+
+	timeFinish := time.Now()
+	duration := timeFinish.Sub(timeStart)
+	log.Printf("Time to render: %v seconds", duration.Seconds())
+}
+
+func processTest(originalImagePath string, tileSize int, outPutDir string) {
+	if originalImagePath == "" {
+		flag.PrintDefaults()
+		os.Exit(2)
+	}
+
+	_, err := os.Stat(originalImagePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			log.Fatalf("%v not found", originalImagePath)
+			os.Exit(2)
+		}
+	}
+
+    basename := filepath.Base(originalImagePath)
+    prefix := fileNameWithoutExtension(basename)
+    
+    img, err := imaging.Open(originalImagePath)
+    if err != nil {
+		log.Fatalf("error")
+		os.Exit(2)
+	}
+    ProcessImage(img, prefix, tileSize, outPutDir)
+}
+
+func ProcessImage(img image.Image, prefix string, tileSize int, outPutDir string) {
+    err := errors.New("Some error")
+
+	done := make(chan worker.TileResult)
+	timeStart := time.Now()
+	cacheResult := cache.CacheAnglesHandler(tileSize)
+	for _, tileName := range tileNames {
+		tile := worker.Tile{TileName: tileName, TileSize: tileSize}
+		go worker.ImageWorker(tile, cacheResult, img, done)
 	}
 
 	for range tileNames {
