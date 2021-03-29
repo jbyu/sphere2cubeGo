@@ -4,10 +4,12 @@ import (
 	"flag"
 	"log"
 	"os"
-	"sphere2cubeGo/cache"
-	"sphere2cubeGo/saver"
-	"sphere2cubeGo/worker"
+	"pano2cube/cache"
+	"pano2cube/saver"
+	"pano2cube/worker"
 	"time"
+	"path/filepath"
+    "strings"
 )
 
 var (
@@ -20,7 +22,7 @@ var (
 		worker.TileLeft,
 	}
 
-	tileSize          = 1024
+	tileSize          = 2048
 	originalImagePath = ""
 	outPutDir         = "./build"
 
@@ -29,12 +31,20 @@ var (
 	outPutDirCmd         = flag.String("o", outPutDir, "Path to output directory")
 )
 
+func fileNameWithoutExtension(fileName string) string {
+	return strings.TrimSuffix(fileName, filepath.Ext(fileName))
+}
+
 func main() {
 
 	flag.Parse()
 	tileSize = *tileSizeCmd
 	originalImagePath = *originalImagePathCmd
 	outPutDir = *outPutDirCmd
+    process(originalImagePath, tileSize, outPutDir)
+}
+
+func process(originalImagePath string, tileSize int, outPutDir string) {
 
 	if originalImagePath == "" {
 		flag.PrintDefaults()
@@ -49,6 +59,9 @@ func main() {
 		}
 	}
 
+    basename := filepath.Base(originalImagePath)
+    prefix := fileNameWithoutExtension(basename)
+
 	done := make(chan worker.TileResult)
 	timeStart := time.Now()
 	cacheResult := cache.CacheAnglesHandler(tileSize)
@@ -59,7 +72,8 @@ func main() {
 
 	for range tileNames {
 		tileResult := <-done
-		err = saver.SaveTile(tileResult, outPutDir)
+		//err = saver.SaveTile(tileResult, outPutDir)
+        err = saver.SaveTileSlices(tileResult, prefix, outPutDir)
 
 		if err != nil {
 			log.Fatal(err.Error())
